@@ -1,2 +1,8 @@
+<div align="center">
+
 # TorchRT
-Simple library for PyTorch >> ONNX >> TensorRT conversion
+
+**The lightweight PyTorch->TensorRT converter with a focus on simplicity**
+
+<center>
+
