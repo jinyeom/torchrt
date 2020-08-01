@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from collections import OrderedDict
-from typing import List, Dict, Union, Tuple
+from typing import List, Dict, Union, Tuple, Optional
 from pathlib import Path
 import onnx
 import onnx.helper
@@ -37,13 +37,16 @@ def _numpy_dtype(elem_type: int) -> int:
     ][elem_type]
 
 
-def _forward(model: onnx.ModelProto, nodes: List[onnx.NodeProto]):
+def _forward(
+    model: onnx.ModelProto, extra_output_nodes: Optional[List[onnx.NodeProto]] = None
+) -> OrderedDict[str, np.ndarray]:
     # add outputs of the argument nodes as model outputs.
-    model = deepcopy(model)
-    for node in nodes:
-        for output in node.output:
-            value_info = onnx.ValueInfoProto(name=output)
-            model.graph.output.append(value_info)
+    if extra_output_nodes is not None:
+        model = deepcopy(model)
+        for node in extra_output_nodes:
+            for output in node.output:
+                value_info = onnx.ValueInfoProto(name=output)
+                model.graph.output.append(value_info)
 
     # create ONNX runtime session
     sess_options = onnxrt.SessionOptions()
@@ -159,7 +162,23 @@ def _optimize(model: onnx.ModelProto) -> onnx.ModelProto:
     return model
 
 
-def _simplify(model: onnx.ModelProto, optimize: bool = True):
+def _check_simplified(model: onnx.ModelProto, sim_model: onnx.ModelProto):
+    model_outputs = _forward(model)
+    sim_model_outputs = _forward(sim_model)
+
+    for output_name in model_outputs:
+        model_output = model_outputs[output_name]
+        sim_model_output = sim_model_outputs[output_name]
+
+        if not np.allclose(model_output, sim_model_output, rtol=1e-4, atol=1e-5):
+            mean_diff = np.abs(model_output - sim_model_output).mean()
+            raise ValueError(
+                f"Output `{output_name}` does not match before and after simplifying.\n"
+                f"Before:\n{model_output}\nAfter:\n{sim_model_output}\nDiff={mean_diff}"
+            )
+
+
+def _simplify(model: onnx.ModelProto, optimize: bool = True) -> onnx.ModelProto:
     model_copy = deepcopy(model)
     model = onnx.shape_inference.infer_shapes(model)
 
@@ -172,6 +191,7 @@ def _simplify(model: onnx.ModelProto, optimize: bool = True):
         model = _optimize(model)
         onnx.checker.check_model(model)
 
+    _check_simplified(model_copy, model)
     return model
 
 
